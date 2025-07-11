@@ -1,5 +1,4 @@
-// Import all required modules
-
+// Import required modules
 const {
   default: makeWASocket,
   fetchLatestBaileysVersion,
@@ -7,13 +6,11 @@ const {
   useMultiFileAuthState,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
-
-// Load environment variables via dotenv
 require('dotenv').config();
 
 const AUTH_FOLDER = './auth_info_baileys';
 const TRIGGER = (process.env.TRIGGER || '!tagall').trim();
-const OWNER_JID = process.env.OWNER_JID; // Add this in .env
+const OWNER_JID = process.env.OWNER_JID?.trim();
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
@@ -23,17 +20,23 @@ async function startBot() {
     auth: state,
     version,
     browser: Browsers.ubuntu('SilentTagBot'),
-    syncFullHistory: true,
+    syncFullHistory: false, // optional: disables heavy history sync
   });
+
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', ({ qr, connection }) => {
     if (qr) {
-      console.log('📸 Scan QR:');
+      console.log('📸 Scan this QR code to connect:');
       qrcode.generate(qr, { small: true });
     }
-    if (connection === 'open') console.log('✅ Bot connected');
-    if (connection === 'close') startBot();
+    if (connection === 'open') {
+      console.log('✅ Bot connected and ready!');
+    }
+    if (connection === 'close') {
+      console.log('🔄 Disconnected. Reconnecting...');
+      startBot();
+    }
   });
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -46,21 +49,21 @@ async function startBot() {
       ''
     ).trim();
 
-    console.log('🔍 Message:', {
-      text,
-      participant: msg.key.participant,
-      ownerJid: OWNER_JID,
-    });
+    const senderJid = msg.key.participant || msg.key.remoteJid;
 
-    if (text === TRIGGER && msg.key.participant === OWNER_JID) {
+    if (text === TRIGGER && senderJid === OWNER_JID) {
       const group = msg.key.remoteJid;
       const meta = await sock.groupMetadata(group);
       const mentions = meta.participants.map((p) => p.id);
+
       await sock.sendMessage(group, {
-        text: '🔔 Silent notify all!',
+        text: '🔔 Silently tag everyone...🌝',
         mentions,
       });
-      console.log(`✅ Tagged ${mentions.length} members`);
+
+      console.log(
+        `✅ Tagged ${mentions.length} member(s) in group: ${meta.subject}`
+      );
     }
   });
 }
