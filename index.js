@@ -1,4 +1,4 @@
-// Import required modules
+// index.js
 const {
   default: makeWASocket,
   fetchLatestBaileysVersion,
@@ -6,6 +6,7 @@ const {
   useMultiFileAuthState,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const pino = require('pino');
 require('dotenv').config();
 
 const AUTH_FOLDER = './auth_info_baileys';
@@ -19,15 +20,16 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     version,
+    logger: pino({ level: 'silent' }),
     browser: Browsers.ubuntu('SilentTagBot'),
-    syncFullHistory: false, // optional: disables heavy history sync
+    syncFullHistory: false,
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', ({ qr, connection }) => {
     if (qr) {
-      console.log('📸 Scan this QR code to connect:');
+      console.log('📸 Scan QR to connect:');
       qrcode.generate(qr, { small: true });
     }
     if (connection === 'open') {
@@ -41,29 +43,33 @@ async function startBot() {
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
-    if (!msg.message || !msg.key.remoteJid?.endsWith('@g.us')) return;
+    try {
+      if (!msg.message || !msg.key.remoteJid?.endsWith('@g.us')) return;
 
-    const text = (
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      ''
-    ).trim();
+      const text =
+        msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
-    const senderJid = msg.key.participant || msg.key.remoteJid;
+      const senderJid = msg.key.participant || msg.key.remoteJid;
 
-    if (text === TRIGGER && senderJid === OWNER_JID) {
-      const group = msg.key.remoteJid;
-      const meta = await sock.groupMetadata(group);
-      const mentions = meta.participants.map((p) => p.id);
+      if (text.trim() === TRIGGER && senderJid === OWNER_JID) {
+        const group = msg.key.remoteJid;
+        const meta = await sock.groupMetadata(group);
+        const mentions = meta.participants.map((p) => p.id);
 
-      await sock.sendMessage(group, {
-        text: '🔔 Silently tag everyone...🌝',
-        mentions,
-      });
+        await sock.sendMessage(group, {
+          text: '🔔 Silently tag everyone...🌝',
+          mentions,
+        });
 
-      console.log(
-        `✅ Tagged ${mentions.length} member(s) in group: ${meta.subject}`
-      );
+        console.log(
+          `✅ Tagged ${mentions.length} member(s) in group: ${meta.subject}`
+        );
+      }
+    } catch (err) {
+      if (!err.message?.includes('No SenderKeyRecord')) {
+        console.error('❌ Error in message handler:', err);
+      }
+      // else: silently ignore expected decrypt errors
     }
   });
 }
