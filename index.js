@@ -1,4 +1,3 @@
-// index.js
 const {
   default: makeWASocket,
   fetchLatestBaileysVersion,
@@ -27,17 +26,19 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', ({ qr, connection }) => {
+  sock.ev.on('connection.update', async ({ qr, connection }) => {
     if (qr) {
       console.log('📸 Scan QR to connect:');
       qrcode.generate(qr, { small: true });
     }
+
     if (connection === 'open') {
-      console.log('✅ Bot connected and ready!');
+      console.log('✅ Bot connected. Waiting for full readiness...');
     }
+
     if (connection === 'close') {
       console.log('🔄 Disconnected. Reconnecting...');
-      startBot();
+      await startBot();
     }
   });
 
@@ -48,9 +49,17 @@ async function startBot() {
 
       const text =
         msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-
       const senderJid = msg.key.participant || msg.key.remoteJid;
 
+      // Warm up session: respond to owner's first message
+      if (text.trim() === '.' && senderJid === OWNER_JID) {
+        await sock.sendMessage(msg.key.remoteJid, {
+          text: '✅ Bot is warmed up and ready.',
+        });
+        return;
+      }
+
+      // Handle trigger command
       if (text.trim() === TRIGGER && senderJid === OWNER_JID) {
         const group = msg.key.remoteJid;
         const meta = await sock.groupMetadata(group);
@@ -66,10 +75,17 @@ async function startBot() {
         );
       }
     } catch (err) {
-      if (!err.message?.includes('No SenderKeyRecord')) {
-        console.error('❌ Error in message handler:', err);
+      const msg = err?.message || '';
+      if (
+        msg.includes('No SenderKeyRecord') ||
+        msg.includes('Bad MAC') ||
+        msg.includes('decryptWhisperMessage')
+      ) {
+        // Expected decrypt issues — skip silently
+        return;
       }
-      // else: silently ignore expected decrypt errors
+
+      console.error('❌ Unexpected error in message handler:', err);
     }
   });
 }
